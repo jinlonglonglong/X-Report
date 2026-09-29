@@ -1,0 +1,153 @@
+// skillRunner.ts
+import OpenAI from 'openai';
+import type { Skill } from './skillLoader.ts';
+
+export interface SkillRunOptions {
+    model: string;
+    temperature?: number;
+
+    /** 共享参考（例如 rubric 的 body），会作为独立段落拼进 system */
+    sharedContext?: string;
+
+    /** 追加在 user message 末尾，用于附加"这是本次要分析的数据"等 */
+    appendix?: string;
+
+    /** 是否要求结构化 JSON 输出 */
+    outputMode?: 'markdown' | 'json';
+
+    /** 自定义 system 片段（可覆盖或追加） */
+    systemSuffix?: string;
+}
+
+export interface SkillRunResult<T = string> {
+    output: T;
+    raw: string;
+    usage?: { promptTokens: number; completionTokens: number };
+}
+
+function buildSystem(skill: Skill, opts: SkillRunOptions): string {
+    const parts: string[] = [];
+
+    parts.push(
+        `# 技能：${skill.name}` +
+        (skill.description ? `\n${skill.description}` : ''),
+    );
+
+    parts.push(`# 技能指令\n${skill.body}`);
+
+    if (opts.sharedContext) {
+        parts.push(`# 共享参考：分析量表（必须严格遵守）\n${opts.sharedContext}`);
+    }
+
+    if (opts.systemSuffix) {
+        parts.push(opts.systemSuffix);
+    }
+
+    return parts.join('\n\n---\n\n');
+}
+
+/* export  async function runSkill(
+    client: OpenAI,
+    skill: Skill,
+    userInput: string,
+    opts: SkillRunOptions,
+): Promise<SkillRunResult> {
+    const system = buildSystem(skill, opts);
+
+    const userParts: string[] = [userInput];
+    if (opts.appendix) userParts.push(opts.appendix);
+    if (opts.outputMode === 'json') {
+        userParts.push(
+            '\n\n**请只输出合法 JSON，不要包含 Markdown 代码块或任何解释性文字。**',
+        );
+    }
+
+    const resp = await client.chat.completions.create({
+        model: opts.model,
+        temperature: opts.temperature ?? 0.2,
+        messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: userParts.join('\n\n') },
+        ],
+        ...(opts.outputMode === 'json'
+            ? { response_format: { type: 'json_object' as const } }
+            : {}),
+    });
+
+
+
+    const raw = resp.choices[0]?.message?.content ?? '';
+    const output =
+        opts.outputMode === 'json' ? JSON.parse(raw || '{}') : raw;
+
+    return {
+        output,
+        raw,
+        usage: resp.usage
+            ? {
+                promptTokens: resp.usage.prompt_tokens,
+                completionTokens: resp.usage.completion_tokens,
+            }
+            : undefined,
+    };
+} */
+
+
+export async function runSkill(
+    client: OpenAI,
+    skill: Skill,
+    userInput: string,
+    opts: SkillRunOptions,
+): Promise<SkillRunResult> {
+    const system = buildSystem(skill, opts);
+
+    const userParts: string[] = [userInput];
+    if (opts.appendix) userParts.push(opts.appendix);
+    if (opts.outputMode === 'json') {
+        userParts.push(
+            '\n\n**请只输出合法 JSON，不要包含 Markdown 代码块或任何解释性文字。**',
+        );
+    }
+
+    // 使用全新的 Responses API
+    const resp = await client.responses.create({
+        model: opts.model,
+        temperature: opts.temperature ?? 0.2,
+        // 1. system prompt 改为 instructions 参数传入
+        instructions: system,
+        // 2. messages 改为 input 参数（可以是字符串，也可以是消息对象数组）
+        input: userParts.join('\n\n'),
+        // 3. JSON 模式的参数结构不同
+        ...(opts.outputMode === 'json'
+            ? { text: { format: { type: 'json_object' } } }
+            : {}),
+    });
+
+    // 4. 获取返回值：使用 output_text 替代 choices[0].message.content
+    const raw = resp.output_text ?? '';
+
+    // 5. 增加 JSON 解析的容错处理，防止模型偶尔输出 Markdown 代码块导致崩溃
+    let output: any = raw;
+    if (opts.outputMode === 'json') {
+        try {
+            // 尝试剥离可能存在的 Markdown 代码块标记
+            const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+            output = JSON.parse(cleaned || '{}');
+        } catch (err) {
+            console.error('[runSkill] JSON 解析失败，原始输出为:', raw);
+            output = {}; // 或抛出错误，取决于你的业务需求
+        }
+    }
+
+    return {
+        output,
+        raw,
+        // 6. ⚠️ 关键修改：Responses API 的 usage 字段名与 Chat API 不同
+        usage: resp.usage
+            ? {
+                promptTokens: resp.usage.input_tokens,
+                completionTokens: resp.usage.output_tokens,
+            }
+            : undefined,
+    };
+}
