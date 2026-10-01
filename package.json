@@ -15,7 +15,7 @@
   "author": "Matschik <mathieu.schimmerling@protonmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@ai-sdk/xai": "^5.0.5",
+    "@ai-sdk/xai": "^5.0.10",
     "@types/archiver": "^8.0.0",
     "ai": "^7.0.109",
     "archiver": "^8.0.0",
