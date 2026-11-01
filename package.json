@@ -26,7 +26,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^26.6.6",
     "@types/node-cron": "^3.0.11",
     "cross-env": "^10.1.0",
     "fastify-tsconfig": "^3.0.0",
